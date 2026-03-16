@@ -1,4 +1,5 @@
 import os
+import sys
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
@@ -12,26 +13,28 @@ REPO_ROOT = str(Path(__file__).parent.parent.parent)
 @pytest.fixture
 def mock_sky():
     """Mock the sky module for remote execution tests."""
-    with patch('research_scaffold.remote_execution.sky') as mock:
-        # Mock sky.Task.from_yaml to return a mock task
-        mock_task = MagicMock()
-        mock.Task.from_yaml.return_value = mock_task
+    mock = MagicMock()
 
-        # Mock sky.launch to return a request_id string
-        mock.launch.return_value = "req-launch-123"
+    # Mock sky.Task.from_yaml to return a mock task
+    mock_task = MagicMock()
+    mock.Task.from_yaml.return_value = mock_task
 
-        # Mock sky.get to return (job_id, handle)
-        mock.get.return_value = (1, MagicMock())
+    # Mock sky.launch to return a request_id string
+    mock.launch.return_value = "req-launch-123"
 
-        # Mock sky.status
-        mock.status.return_value = "req-status-123"
+    # Mock sky.get to return (job_id, handle)
+    mock.get.return_value = (1, MagicMock())
 
-        # Mock sky.jobs.launch to return a request_id string
-        mock.jobs.launch.return_value = "req-managed-456"
+    # Mock sky.status
+    mock.status.return_value = "req-status-123"
 
-        # Mock sky.jobs.tail_logs
-        mock.jobs.tail_logs.return_value = None
+    # Mock sky.jobs.launch to return a request_id string
+    mock.jobs.launch.return_value = "req-managed-456"
 
+    # Mock sky.jobs.tail_logs
+    mock.jobs.tail_logs.return_value = None
+
+    with patch.dict(sys.modules, {'sky': mock}):
         yield {
             'sky': mock,
             'task': mock_task,

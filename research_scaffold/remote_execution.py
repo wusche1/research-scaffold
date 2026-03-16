@@ -9,7 +9,6 @@ import subprocess
 from typing import Optional
 
 import git
-import sky
 
 from .types import Config, InstanceConfig
 from .util import get_logger, load_config_dict, deep_update, substitute_placeholders
@@ -338,6 +337,7 @@ def get_existing_cluster(cluster_name: str) -> Optional[dict]:
         Cluster record dict if exists, None otherwise
     """
     try:
+        import sky
         request_id = sky.status(cluster_names=[cluster_name])
         clusters = sky.get(request_id)
         if clusters:
@@ -418,6 +418,7 @@ def _build_sky_task(
         temp_config_path = f.name
 
     try:
+        import sky
         task = sky.Task.from_yaml(temp_config_path)
     finally:
         os.unlink(temp_config_path)
@@ -481,6 +482,7 @@ def launch_remote_job(
         log.info("Launching remote job...")
 
         # Launch the task - returns a request_id for async tracking
+        import sky
         request_id = sky.launch(
             task,
             cluster_name=cluster_name,
@@ -539,6 +541,7 @@ def launch_managed_job(
         log.info(f"Managed job name: {managed_job_name}")
         log.info("Launching managed job...")
 
+        import sky
         request_id = sky.jobs.launch(task, name=managed_job_name)
 
         log.info(f"🚀 Managed job '{job_name}' submitted (request: {request_id})")
