@@ -25,6 +25,7 @@ class InstanceConfig:
     name: Optional[str] = None  # Custom cluster name (if not provided, auto-generates a uuid-based name)
     git_commit: Optional[str] = None  # Pin remote to a specific git commit (defaults to current HEAD)
     retry_until_up: bool = False  # Retry provisioning until the cluster is up
+    managed: bool = False  # Use SkyPilot managed jobs (sky.jobs.launch) instead of sky.launch
 
 
 @dataclass
@@ -35,6 +36,7 @@ class Config:
     function_name: str
     # Fields with defaults
     time_stamp_name: Optional[bool] = False
+    time_stamp_group: Optional[bool] = False
     function_kwargs: Optional[StringKeyDict] = None
     function_args: Optional[list] = None
     log_file_path: Optional[str] = None
@@ -102,6 +104,7 @@ class MetaConfig:
     auto_increment_rng_seed: bool
     rng_seed_offset: int
     bonus_dict: Optional[StringKeyDict]
+    parallel: bool = False
 
     @property
     def d(self):

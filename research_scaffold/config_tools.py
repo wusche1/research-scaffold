@@ -5,7 +5,9 @@ Tools for loading and executing experiments from config files.
 # Standard Library
 import logging
 import subprocess
+import sys
 
+import multiprocessing as mp
 from dataclasses import replace
 from os import path, makedirs
 from pprint import pformat
@@ -215,6 +217,7 @@ def load_meta_config(meta_cfg_path: ConfigInput) -> MetaConfig:
         auto_increment_rng_seed=mc_dict.get("auto_increment_rng_seed", False),
         rng_seed_offset=mc_dict.get("rng_seed_offset", 0),
         folder=mc_dict.get("folder", ""),
+        parallel=mc_dict.get("parallel", False),
     )
 
 
@@ -234,6 +237,7 @@ def execute_from_config(
     function_kwargs: Optional[StringKeyDict] = None,
     name: str = "unamed",
     time_stamp_name: bool = False,
+    time_stamp_group: bool = False,
     wandb_project: Optional[str] = None,
     wandb_group: Optional[str] = None,
     wandb_entity: Optional[str] = None,
@@ -254,6 +258,7 @@ def execute_from_config(
     resolved_names = resolve_run_names(
         name=name,
         time_stamp_name=time_stamp_name,
+        time_stamp_group=time_stamp_group,
         wandb_group=wandb_group,
         sweep_name=sweep_name,
     )
@@ -698,6 +703,14 @@ def execute_sweep(
     execute_sweep_from_dict(function_map, sweep_dict)
 
 
+def _parallel_config_worker(index, config, function_map, config_kwargs, error_queue):
+    """Worker for parallel config execution. Runs in a forked subprocess."""
+    try:
+        execute_from_config(config, function_map=function_map, **config_kwargs)
+    except Exception as e:
+        error_queue.put((index, f"{type(e).__name__}: {e}"))
+
+
 def execute_experiments(
     function_map: FunctionMap,
     config_path: Optional[str] = None,
@@ -755,15 +768,48 @@ def execute_experiments(
         # Process regular configs (skips sweeps)
         configs = process_meta_config(meta_config)
         
-        # Execute regular configs
-        for i, config in enumerate(configs):
-            log.info(f"Executing config {i+1}/{len(configs)}")
-            execute_from_config(config, function_map=function_map, **config.d)
-        
-        # Execute sweep experiments
+        # Check if parallel execution applies
+        has_remote = any(c.instance is not None for c in configs)
+        use_parallel = meta_config.parallel and len(configs) > 1 and not has_remote and sys.platform != "win32"
+
+        if meta_config.parallel and has_remote:
+            log.warning(
+                "parallel=True is ignored when remote configs are present — use managed: true for parallel remote execution"
+            )
+        if meta_config.parallel and sys.platform == "win32":
+            log.warning("parallel=True requires fork — falling back to sequential on Windows")
+
+        # Execute configs
+        if use_parallel:
+            log.info(f"Executing {len(configs)} configs in parallel")
+            ctx = mp.get_context("fork")
+            error_queue = ctx.Queue()
+            processes = []
+            for i, config in enumerate(configs):
+                p = ctx.Process(
+                    target=_parallel_config_worker,
+                    args=(i, config, function_map, config.d, error_queue),
+                )
+                processes.append(p)
+                p.start()
+            for i, p in enumerate(processes):
+                p.join()
+                log.info(f"Config {i+1}/{len(configs)} {'completed' if p.exitcode == 0 else 'failed'}")
+            errors = []
+            while not error_queue.empty():
+                errors.append(error_queue.get_nowait())
+            if errors:
+                idx, msg = errors[0]
+                raise RuntimeError(f"Config {idx+1}/{len(configs)} failed: {msg}")
+        else:
+            for i, config in enumerate(configs):
+                log.info(f"Executing config {i+1}/{len(configs)}")
+                execute_from_config(config, function_map=function_map, **config.d)
+
+        # Execute sweep experiments (always sequential)
         for i, sweep_exp in enumerate(sweep_experiments):
             log.info(f"Executing sweep {i+1}/{len(sweep_experiments)}")
-            
+
             # Process sweep spec with same composition rules as regular experiments
             sweep_dict = process_sweep_experiment_spec(
                 sweep_exp,
@@ -772,10 +818,10 @@ def execute_experiments(
                 common_patch=meta_config.common_patch,
                 bonus_dict=meta_config.bonus_dict,
             )
-            
+
             # Execute the sweep
             execute_sweep_from_dict(function_map, sweep_dict)
-        
+
         return
 
     if not configs:
